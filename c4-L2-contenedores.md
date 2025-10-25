@@ -132,12 +132,8 @@ graph TB
 
 | Contenedor | Tecnología | Descripción | Responsabilidades |
 |------------|------------|-------------|-------------------|
-| **User Service** | Node.js / Express | Gestión de usuarios | - Autenticación y autorización<br/>- Perfiles de usuario<br/>- Credenciales de programas de viajero<br/>[Ver componentes →](./c4-L3-04-user-service.md) |
 | **Trip Management Service** | Java / Spring Boot | Gestión de viajes | - Crear y organizar viajes<br/>- Agrupar reservas por viaje<br/>- Eliminar viajes completados<br/>[Ver componentes →](./c4-L3-02-trip-management.md) |
-| **Booking Service** | Java / Spring Boot | Gestión de reservas | - CRUD de reservas (vuelos, hoteles, autos)<br/>- Ingreso manual de reservas<br/>- Sincronización con proveedores<br/>[Ver componentes →](./c4-L3-03-booking-service.md) |
 | **Integration Service** | Python / FastAPI | Integración con proveedores | - Conectores para aerolíneas<br/>- Conectores para hoteles<br/>- Conectores para alquiler de autos<br/>- Mapeo de datos heterogéneos<br/>[Ver componentes →](./c4-L3-01-integration-service.md) |
-| **Sharing Service** | Node.js / Express | Compartir en redes sociales | - Generación de itinerarios compartibles<br/>- Integración OAuth con redes sociales<br/>- Publicación de contenido<br/>[Ver componentes →](./c4-L3-05-sharing-service.md) |
-| **Notification Service** | Node.js / Express | Notificaciones y alertas | - Envío de emails<br/>- Recordatorios de viajes<br/>- Alertas de cambios en reservas |
 
 ### Almacenamiento de Datos
 
@@ -290,9 +286,6 @@ Para ver los componentes internos de cada servicio, consulte:
 
 - [**Integration Service - Componentes**](./c4-L3-01-integration-service.md)
 - [**Trip Management Service - Componentes**](./c4-L3-02-trip-management.md)
-- [**Booking Service - Componentes**](./c4-L3-03-booking-service.md)
-- [**User Service - Componentes**](./c4-L3-04-user-service.md)
-- [**Sharing Service - Componentes**](./c4-L3-05-sharing-service.md)
 
 ---
 

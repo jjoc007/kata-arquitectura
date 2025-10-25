@@ -1,4 +1,4 @@
-# C4 Nivel 3: Componentes - Trip Management Service
+# C4 Nivel 3: Componentes - Trip Management Service (AWS)
 
 [⬅️ Volver al índice](./index-c4.md) | [⬆️ Nivel anterior: Contenedores](./c4-L2-contenedores.md)
 
@@ -6,532 +6,517 @@
 
 ## 📖 Descripción
 
-El **Trip Management Service** es el núcleo del sistema Road Warrior, responsable de gestionar viajes, agrupar reservas automáticamente por viaje, y mantener el ciclo de vida de los viajes (desde la planificación hasta la eliminación automática después de completados).
+El **Trip Management Service** es el núcleo del sistema Road Warrior, responsable de gestionar viajes y agrupar reservas automáticamente. Implementado con **arquitectura serverless AWS** para máxima escalabilidad y eficiencia de costos.
 
 ### Alcance
 
 - **Contenedor:** Trip Management Service
-- **Tecnología:** Java / Spring Boot
-- **Responsabilidad:** Gestión completa del ciclo de vida de los viajes y agrupación inteligente de reservas
+- **Arquitectura AWS:** Serverless con Aurora Serverless
+- **Responsabilidad:** Gestión de viajes y agrupación inteligente de reservas
 
 ---
 
-## 🗺️ Diagrama de Componentes
+## 🗺️ Diagrama de Componentes (AWS)
 
 ```mermaid
 graph TB
-    %% Componentes externos
+    %% Servicios externos
     APIGateway["🚪 API Gateway"]
-    BookingService["📋 Booking Service"]
-    MessageQueue["📬 Message Queue"]
-    TripDB[("🧳 Trip Database")]
-    Cache["⚡ Cache"]
+    BookingServiceECS["📋 Booking Service<br/>(ECS Fargate)"]
 
     %% Componentes del Trip Management Service
-    subgraph TripManagementService["🧳 Trip Management Service"]
+    subgraph TripManagementService["🧳 Trip Management Service - AWS"]
 
-        %% API Layer
-        TripController["🎮 Trip Controller<br/>[Spring REST Controller]<br/><br/>Endpoints para CRUD de viajes<br/>y consulta de itinerarios"]
+        %% Lambda Functions - CRUD
+        TripCRUDFunc["🎮 Trip CRUD Function<br/>[Lambda Node.js]<br/>512MB / 30s timeout<br/><br/>CRUD operations:<br/>Create, Read, Update, Delete trips"]
 
-        %% Application Services
-        TripAppService["🎯 Trip Application Service<br/>[Spring Service]<br/><br/>Lógica de aplicación<br/>y coordinación de casos de uso"]
+        TripQueryFunc["🔍 Trip Query Function<br/>[Lambda Node.js]<br/>256MB / 10s timeout<br/><br/>Queries optimizadas:<br/>List, Filter, Search trips"]
 
-        %% Domain Services
-        TripDomainService["💼 Trip Domain Service<br/>[Domain Service]<br/><br/>Lógica de negocio<br/>para gestión de viajes"]
-
-        BookingGroupingService["🔗 Booking Grouping Service<br/>[Domain Service]<br/><br/>Algoritmo de agrupación<br/>automática de reservas"]
-
-        TripLifecycleService["♻️ Trip Lifecycle Service<br/>[Domain Service]<br/><br/>Gestión del ciclo de vida<br/>de viajes"]
-
-        %% Domain Entities
-        TripEntity["🧳 Trip Entity<br/>[Domain Entity]<br/><br/>Agregado raíz del viaje<br/>con reglas de negocio"]
-
-        TripItemEntity["📌 Trip Item Entity<br/>[Domain Entity]<br/><br/>Referencia a reserva<br/>dentro de un viaje"]
-
-        %% Repositories
-        TripRepository["💾 Trip Repository<br/>[Spring Data JPA]<br/><br/>Persistencia de viajes<br/>y trip items"]
+        %% Lambda Function - Agrupación (Compute-intensive)
+        GroupingFunc["🔗 Booking Grouping Function<br/>[Lambda Python]<br/>3GB RAM / 3min timeout<br/><br/>Algoritmo ML de agrupación<br/>automática de reservas"]
 
         %% Event Handlers
-        BookingEventHandler["📥 Booking Event Handler<br/>[Event Listener]<br/><br/>Procesa eventos de<br/>nuevas reservas"]
+        BookingEventFunc["📥 Booking Event Handler<br/>[Lambda Python]<br/>1GB RAM / 2min timeout<br/><br/>Procesa eventos de<br/>nuevas reservas"]
 
         %% Event Publishers
-        TripEventPublisher["📤 Trip Event Publisher<br/>[Event Publisher]<br/><br/>Publica eventos de<br/>cambios en viajes"]
+        EventPublisherFunc["📤 Event Publisher Function<br/>[Lambda Node.js]<br/>256MB / 30s timeout<br/><br/>Publica eventos de dominio<br/>a EventBridge"]
 
-        %% Schedulers
-        TripCleanupScheduler["🗑️ Trip Cleanup Scheduler<br/>[Spring @Scheduled]<br/><br/>Elimina viajes<br/>completados diariamente"]
+        %% Event Bus
+        EventBridge["📬 EventBridge<br/>[Custom Event Bus]<br/><br/>Event-driven communication<br/>con otros servicios"]
 
-        %% Utilities
-        DateUtils["📅 Date & Time Utils<br/>[Utility Class]<br/><br/>Cálculos de fechas,<br/>zonas horarias"]
+        %% Database
+        AuroraDB["🗄️ Aurora Serverless v2<br/>[PostgreSQL]<br/><br/>Auto-scaling: 0.5-8 ACUs<br/>Multi-AZ deployment<br/><br/>Tables: trips, trip_items"]
 
-        TripValidator["✅ Trip Validator<br/>[Validator]<br/><br/>Validaciones de negocio<br/>para viajes"]
+        %% Cache
+        ElastiCache["⚡ ElastiCache Redis<br/>[Cluster Mode]<br/><br/>Cache de trips por usuario<br/>TTL: 15 minutos"]
 
-        CacheManager["⚡ Cache Manager<br/>[Spring Cache]<br/><br/>Gestión de cache<br/>de viajes"]
+        %% Monitoring
+        CloudWatch["📊 CloudWatch<br/>[Logs + Metrics + Alarms]<br/><br/>Métricas operacionales<br/>Alarmas automáticas"]
+
+        XRay["🔍 X-Ray<br/>[Distributed Tracing]<br/><br/>Trace end-to-end<br/>Performance analysis"]
     end
 
-    %% Relaciones externas
-    APIGateway -->|GET/POST/PUT/DELETE /trips| TripController
-    MessageQueue -->|Evento: booking-created| BookingEventHandler
-    MessageQueue -->|Evento: booking-updated| BookingEventHandler
+    %% Relaciones externas - API
+    APIGateway -->|GET/POST/PUT/DELETE /trips| TripCRUDFunc
+    APIGateway -->|GET /trips/search| TripQueryFunc
+    APIGateway -->|GET /trips/upcoming| TripQueryFunc
 
-    %% Flujo de API
-    TripController --> TripAppService
-    TripAppService --> TripDomainService
-    TripAppService --> BookingGroupingService
-    TripAppService --> TripLifecycleService
+    %% CRUD a Base de Datos
+    TripCRUDFunc <-->|Read/Write| AuroraDB
+    TripQueryFunc -->|Read-only| AuroraDB
 
-    %% Domain Services a Entities
-    TripDomainService --> TripEntity
-    BookingGroupingService --> TripEntity
-    TripLifecycleService --> TripEntity
+    %% CRUD publica eventos
+    TripCRUDFunc --> EventPublisherFunc
+    EventPublisherFunc -->|trip-created, trip-updated| EventBridge
 
-    TripEntity --> TripItemEntity
+    %% Grouping
+    GroupingFunc <-->|Read/Write| AuroraDB
+    GroupingFunc --> EventPublisherFunc
 
-    %% Persistencia
-    TripDomainService --> TripRepository
-    BookingGroupingService --> TripRepository
-    TripLifecycleService --> TripRepository
-    TripRepository -->|JPA/SQL| TripDB
+    %% Event Handlers
+    EventBridge -->|booking-created event| BookingEventFunc
+    EventBridge -->|booking-updated event| BookingEventFunc
 
-    %% Event Handling
-    BookingEventHandler --> BookingGroupingService
-    BookingEventHandler -->|Consulta reserva| BookingService
-
-    %% Event Publishing
-    TripDomainService --> TripEventPublisher
-    TripLifecycleService --> TripEventPublisher
-    TripEventPublisher -->|Publica eventos| MessageQueue
-
-    %% Scheduler
-    TripCleanupScheduler --> TripLifecycleService
-
-    %% Utilities
-    TripAppService -.->|Usa| TripValidator
-    TripDomainService -.->|Usa| DateUtils
-    BookingGroupingService -.->|Usa| DateUtils
-    TripLifecycleService -.->|Usa| DateUtils
+    BookingEventFunc -->|Consulta booking| BookingServiceECS
+    BookingEventFunc -->|Dispara agrupación| GroupingFunc
 
     %% Cache
-    TripAppService --> CacheManager
-    CacheManager -.->|Lee/Escribe| Cache
+    TripQueryFunc <-->|Read/Write| ElastiCache
+    TripCRUDFunc -.->|Invalidate| ElastiCache
+    GroupingFunc -.->|Invalidate| ElastiCache
+
+    %% Monitoring
+    TripCRUDFunc -.->|Logs/Metrics| CloudWatch
+    TripQueryFunc -.->|Logs/Metrics| CloudWatch
+    GroupingFunc -.->|Logs/Metrics| CloudWatch
+    BookingEventFunc -.->|Logs/Metrics| CloudWatch
+
+    %% X-Ray Tracing
+    APIGateway -.->|Trace| XRay
+    TripCRUDFunc -.->|Trace| XRay
+    GroupingFunc -.->|Trace| XRay
+    AuroraDB -.->|Query trace| XRay
 
     %% Estilos
-    classDef controller fill:#85bbf0,stroke:#5d9dd5,color:#000000
-    classDef appservice fill:#ffa726,stroke:#f57c00,color:#000000
-    classDef domainservice fill:#66bb6a,stroke:#43a047,color:#000000
-    classDef entity fill:#ab47bc,stroke:#8e24aa,color:#ffffff
-    classDef repository fill:#ef5350,stroke:#d32f2f,color:#ffffff
-    classDef event fill:#42a5f5,stroke:#1976d2,color:#000000
-    classDef scheduler fill:#ffa726,stroke:#f57c00,color:#000000
-    classDef utility fill:#90caf9,stroke:#42a5f5,color:#000000
+    classDef lambda fill:#FF9900,stroke:#E87500,color:#000000
+    classDef database fill:#3B48CC,stroke:#2E3A9F,color:#ffffff
+    classDef cache fill:#C925D1,stroke:#9F1EA7,color:#ffffff
+    classDef messaging fill:#FF9900,stroke:#E87500,color:#000000
+    classDef monitoring fill:#759C3E,stroke:#5D7D31,color:#ffffff
     classDef external fill:#999999,stroke:#6b6b6b,color:#ffffff
 
-    class TripController controller
-    class TripAppService appservice
-    class TripDomainService,BookingGroupingService,TripLifecycleService domainservice
-    class TripEntity,TripItemEntity entity
-    class TripRepository repository
-    class BookingEventHandler,TripEventPublisher event
-    class TripCleanupScheduler scheduler
-    class DateUtils,TripValidator,CacheManager utility
-    class APIGateway,BookingService,MessageQueue,TripDB,Cache external
+    class TripCRUDFunc,TripQueryFunc,GroupingFunc,BookingEventFunc,EventPublisherFunc lambda
+    class AuroraDB database
+    class ElastiCache cache
+    class EventBridge messaging
+    class CloudWatch,XRay monitoring
+    class APIGateway,BookingServiceECS external
 ```
 
 ---
 
-## 🔍 Componentes Detallados
+## 🏗️ Arquitectura AWS: Decisiones y Justificaciones
 
-### Capa de Presentación (API)
+### 🔶 Serverless First Approach
 
-| Componente | Responsabilidad | Endpoints |
-|------------|-----------------|-----------|
-| **Trip Controller** | - Expone API REST para viajes<br/>- Validación de requests<br/>- Transformación DTO ↔ Entity | - `GET /trips` - Listar viajes del usuario<br/>- `GET /trips/{id}` - Detalle de viaje<br/>- `POST /trips` - Crear viaje<br/>- `PUT /trips/{id}` - Actualizar viaje<br/>- `DELETE /trips/{id}` - Eliminar viaje<br/>- `GET /trips/upcoming` - Viajes próximos |
-
-### Capa de Aplicación
-
-| Componente | Responsabilidad | Métodos Clave |
-|------------|-----------------|---------------|
-| **Trip Application Service** | - Orquesta casos de uso<br/>- Coordina múltiples servicios de dominio<br/>- Maneja transacciones<br/>- Gestiona cache | - `createTrip()`<br/>- `updateTrip()`<br/>- `deleteTrip()`<br/>- `getTripDetails()`<br/>- `getUpcomingTrips()` |
-
-### Capa de Dominio (Servicios)
-
-| Componente | Responsabilidad | Lógica de Negocio |
-|------------|-----------------|-------------------|
-| **Trip Domain Service** | - CRUD de viajes<br/>- Validaciones de negocio<br/>- Reglas de consistencia | - Crear viaje con fechas válidas<br/>- Validar que fecha inicio < fecha fin<br/>- Asociar/desasociar trip items |
-| **Booking Grouping Service** | - Algoritmo de agrupación automática<br/>- Detectar a qué viaje pertenece una reserva<br/>- Crear viaje si no existe | - **Estrategia de agrupación:**<br/>  1. Por fechas coincidentes<br/>  2. Por ubicación geográfica<br/>  3. Por proximidad temporal (±3 días)<br/>  4. Por metadata del usuario<br/>- Auto-crear viaje si no coincide con ninguno |
-| **Trip Lifecycle Service** | - Gestión de estados del viaje<br/>- Eliminación de viajes completados<br/>- Archivado de viajes | - Estados: `PLANNED`, `IN_PROGRESS`, `COMPLETED`<br/>- Eliminar viajes `COMPLETED` después de 30 días<br/>- Transiciones de estado automáticas |
-
-### Capa de Dominio (Entidades)
-
-| Componente | Responsabilidad | Atributos Clave |
-|------------|-----------------|-----------------|
-| **Trip Entity** | - Agregado raíz del viaje<br/>- Encapsula reglas de negocio<br/>- Invariantes del dominio | - `id: UUID`<br/>- `userId: UUID`<br/>- `name: String`<br/>- `startDate: LocalDate`<br/>- `endDate: LocalDate`<br/>- `status: TripStatus`<br/>- `destination: String`<br/>- `items: List<TripItem>`<br/>- **Invariantes:**<br/>  • startDate ≤ endDate<br/>  • Al menos 1 item en viaje activo |
-| **Trip Item Entity** | - Referencia a una reserva<br/>- Parte del agregado Trip | - `id: UUID`<br/>- `tripId: UUID`<br/>- `bookingId: UUID`<br/>- `bookingType: BookingType` (FLIGHT, HOTEL, CAR)<br/>- `sequence: Integer` (orden en itinerario) |
-
-### Capa de Persistencia
-
-| Componente | Responsabilidad | Tecnología |
-|------------|-----------------|------------|
-| **Trip Repository** | - Operaciones de persistencia<br/>- Queries personalizadas<br/>- Optimistic locking | Spring Data JPA<br/>Métodos:<br/>- `findByUserId()`<br/>- `findUpcomingTrips()`<br/>- `findByStatus()`<br/>- `findCompletedBefore(date)` |
-
-### Capa de Eventos
-
-| Componente | Responsabilidad | Eventos |
-|------------|-----------------|---------|
-| **Booking Event Handler** | - Escucha eventos de reservas<br/>- Dispara agrupación automática | - Consume: `booking-created`<br/>- Consume: `booking-updated`<br/>- Consume: `booking-deleted` |
-| **Trip Event Publisher** | - Publica eventos de dominio<br/>- Notifica cambios en viajes | - Publica: `trip-created`<br/>- Publica: `trip-updated`<br/>- Publica: `trip-deleted`<br/>- Publica: `trip-item-added` |
-
-### Tareas Programadas
-
-| Componente | Responsabilidad | Frecuencia |
-|------------|-----------------|------------|
-| **Trip Cleanup Scheduler** | - Ejecuta limpieza de viajes antiguos<br/>- Elimina viajes completados hace >30 días | Diaria (02:00 AM UTC) |
-
-### Componentes Utilitarios
-
-| Componente | Responsabilidad | Funciones |
-|------------|-----------------|-----------|
-| **Date & Time Utils** | - Cálculos de fechas<br/>- Conversión de zonas horarias<br/>- Comparación de rangos | - `isDateInRange()`<br/>- `daysBetween()`<br/>- `toUserTimezone()`<br/>- `overlaps()` |
-| **Trip Validator** | - Validaciones de reglas de negocio | - Valida fechas<br/>- Valida superposición de viajes<br/>- Valida items duplicados |
-| **Cache Manager** | - Gestión de cache de viajes<br/>- Invalidación selectiva | - Cache de viajes por usuario<br/>- TTL: 15 minutos<br/>- Invalidación en updates |
+| Aspecto | Decisión | Justificación |
+|---------|----------|---------------|
+| **API Layer** | Lambda Functions | - Escalado automático instant <br/>- Pago por invocación<br/>- Sin gestión de servidores<br/>- Cold start < 200ms con optimización |
+| **Database** | Aurora Serverless v2 | - Auto-scaling de capacidad (ACUs)<br/>- Pago por uso<br/>- Compatibilidad PostgreSQL<br/>- Pause automático en inactividad |
+| **Events** | EventBridge | - Event-driven nativo<br/>- Routing de eventos<br/>- Integración con 300+ servicios |
+| **Cache** | ElastiCache Redis | - Latencia sub-ms<br/>- Compartido entre Lambdas<br/>- Invalidación eficiente |
 
 ---
 
-## 🔄 Flujos de Datos
+## 📋 Componentes AWS Detallados
 
-### 1. Crear Viaje Manualmente
+### Lambda Functions
 
+| Función Lambda | Justificación | Configuración |
+|----------------|---------------|---------------|
+| **Trip CRUD Function** | - **Operaciones simples** CRUD<br/>- **Stateless** y paralelizable<br/>- **Alta concurrencia** esperada<br/>- **Costo-efectivo** para APIs | - Runtime: Node.js 18<br/>- Memory: 512MB<br/>- Timeout: 30s<br/>- Reserved concurrency: 50<br/>- Provisioned: 5 (warm) |
+| **Trip Query Function** | - **Read-only optimizado**<br/>- **Cache-aside pattern**<br/>- **Queries complejas** con joins<br/>- **Menor memoria** que CRUD | - Runtime: Node.js 18<br/>- Memory: 256MB<br/>- Timeout: 10s<br/>- Concurrency: 100<br/>- Provisioned: 10 |
+| **Booking Grouping Function** | - **Algoritmo compute-intensive**<br/>- **ML scoring** de similitud<br/>- **3GB RAM** para dataset grande<br/>- **Python** para librerías ML | - Runtime: Python 3.11<br/>- Memory: 3GB<br/>- Timeout: 3 min<br/>- Ephemeral storage: 2GB<br/>- Layers: scikit-learn, pandas |
+| **Booking Event Handler** | - **Event-driven** desde EventBridge<br/>- **Async processing**<br/>- **Coordina** con Grouping Function | - Runtime: Python 3.11<br/>- Memory: 1GB<br/>- Timeout: 2 min<br/>- Retry: 2 veces<br/>- DLQ: Sí |
+| **Event Publisher Function** | - **Publica eventos** de dominio<br/>- **Batch publishing** a EventBridge<br/>- **Garantía de entrega** | - Runtime: Node.js 18<br/>- Memory: 256MB<br/>- Timeout: 30s<br/>- Batch: 10 eventos max |
+
+**¿Por qué Lambda y no ECS para este servicio?**
+- ✅ **Tráfico variable:** API requests varían mucho (picos en horarios de viaje)
+- ✅ **Operaciones cortas:** Mayoría de operaciones < 30 segundos
+- ✅ **Escalado instant:** De 0 a 1000 concurrent en segundos
+- ✅ **Costo:** Solo paga cuando ejecuta, no 24/7
+- ❌ **No hay procesos largos** como en Integration Service
+- ❌ **No necesita estado** persistente
+
+### Base de Datos
+
+| Servicio AWS | Justificación | Configuración |
+|--------------|---------------|---------------|
+| **Aurora Serverless v2 (PostgreSQL)** | - **Auto-scaling** de 0.5 a 8 ACUs según carga<br/>- **Multi-AZ** automático para alta disponibilidad<br/>- **Backup continuo** a S3<br/>- **Compatibilidad** total con PostgreSQL<br/>- **Data API** para Lambdas sin VPC<br/>- **Pause automático** si no hay actividad (15 min) | - Engine: PostgreSQL 14<br/>- Min ACUs: 0.5 (1GB RAM)<br/>- Max ACUs: 8 (16GB RAM)<br/>- Multi-AZ: Sí<br/>- Backup retention: 7 días<br/>- Encryption: KMS<br/>- Data API: Habilitado |
+
+**¿Por qué Aurora Serverless v2 y no RDS o DynamoDB?**
+
+**vs RDS Standard:**
+- ✅ **Auto-scaling:** RDS requiere dimensionamiento fijo
+- ✅ **Costo:** Aurora Serverless paga por ACU-hora, no por instancia 24/7
+- ✅ **Pause:** Aurora puede pausar automáticamente, RDS no
+
+**vs DynamoDB:**
+- ✅ **Queries complejas:** Necesitamos JOINs (trips + trip_items)
+- ✅ **Transacciones ACID:** Agrupación requiere atomicidad
+- ✅ **Familiaridad:** Equipo ya conoce PostgreSQL
+- ❌ **Latencia:** DynamoDB es más rápido (single-digit ms)
+- ❌ **Escalado:** DynamoDB escala mejor para >100K RPS
+
+### Event-Driven Architecture
+
+| Servicio AWS | Justificación | Configuración |
+|--------------|---------------|---------------|
+| **EventBridge** | - **Desacoplamiento** entre servicios<br/>- **Event routing** con reglas<br/>- **Schema registry** para validación<br/>- **Archive** de eventos para replay<br/>- **300+ destinos** nativos | - Event bus: Custom<br/>- Rules: 10 (filtering)<br/>- Archive: 30 días<br/>- Schema discovery: Sí<br/>- Dead-letter queue: Sí |
+
+### Cache
+
+| Servicio AWS | Justificación | Configuración |
+|--------------|---------------|---------------|
+| **ElastiCache Redis (Cluster Mode)** | - **Latencia <1ms** para queries frecuentes<br/>- **Cache compartido** entre Lambdas<br/>- **TTL automático** (15 min)<br/>- **Pub/Sub** para invalidación distribuida<br/>- **High availability** con Multi-AZ | - Node: cache.t4g.small<br/>- Nodes: 2 (Multi-AZ)<br/>- Engine: Redis 7.0<br/>- Encryption: In-transit<br/>- Backup: Diario |
+
+**Cache Strategy:**
 ```
-Usuario → API Gateway → Trip Controller
-                            ↓
-                    Trip Application Service
-                            ↓
-                    Trip Validator (valida datos)
-                            ↓
-                    Trip Domain Service
-                            ↓
-                    Trip Entity (nuevo viaje)
-                            ↓
-                    Trip Repository → Trip DB
-                            ↓
-                    Trip Event Publisher → Message Queue (trip-created)
-                            ↓
-                    Cache Manager (invalida cache de usuario)
-```
-
-### 2. Agrupación Automática de Reserva Nueva
-
-```
-Integration Service → Message Queue (booking-created)
-                            ↓
-                    Booking Event Handler
-                            ↓
-                    Booking Service (obtiene detalles de reserva)
-                            ↓
-                    Booking Grouping Service
-                            ↓
-        ┌───────────────────┴───────────────────┐
-        ↓                                       ↓
-¿Existe viaje compatible?                 ¿No existe?
-        ↓                                       ↓
-  Trip Repository (buscar por fechas)    Trip Domain Service
-        ↓                                   (crear viaje auto)
-  Trip Entity (agregar trip item)              ↓
-        ↓                                 Trip Repository
-  Trip Repository (actualizar)                  ↓
-        ↓                                 Trip Entity (nuevo)
-  Trip Event Publisher                          ↓
-  (trip-item-added)                       Trip Event Publisher
-                                          (trip-created)
-```
-
-### 3. Consultar Viajes Próximos
-
-```
-Usuario → API Gateway → Trip Controller
-                            ↓
-                    Trip Application Service
-                            ↓
-                    Cache Manager (check cache)
-                            ↓
-                        ¿Hit? → Sí → Return
-                            ↓
-                          No
-                            ↓
-                    Trip Repository
-                    (findUpcomingTrips)
-                            ↓
-                    Trip DB (WHERE endDate >= NOW() AND status != COMPLETED)
-                            ↓
-                    For each trip:
-                      Booking Service (obtener detalles de cada reserva)
-                            ↓
-                    Cache Manager (guardar resultado)
-                            ↓
-                    Return viajes con reservas completas
+Key pattern: trip:{userId}:list
+TTL: 15 minutos
+Invalidation: On trip create/update/delete
 ```
 
-### 4. Limpieza Automática de Viajes Completados
+### Monitoring y Observabilidad
+
+| Servicio AWS | Justificación | Configuración |
+|--------------|---------------|---------------|
+| **CloudWatch Logs** | - **Centralizado** de todos los Lambdas<br/>- **Logs Insights** para queries<br/>- **Metric filters** para alarmas | - Retention: 30 días<br/>- Log groups: Por función<br/>- Insights queries: 5 saved |
+| **CloudWatch Metrics** | - **Métricas custom** de negocio<br/>- **Dashboards** operacionales<br/>- **Anomaly detection** | - Custom namespace: TripService<br/>- Metrics: TripCreated, TripGrouped<br/>- Dashboards: 1 |
+| **X-Ray** | - **Distributed tracing** end-to-end<br/>- **Service map** visual<br/>- **Latency analysis** | - Sampling: 10%<br/>- Annotations: userId, tripId<br/>- Groups: By error status |
+
+---
+
+## 🔄 Flujos de Datos con AWS
+
+### 1. Crear Viaje Manual (API)
 
 ```
-Scheduler (diario 02:00 AM) → Trip Cleanup Scheduler
-                                    ↓
-                            Trip Lifecycle Service
-                                    ↓
-                            Trip Repository
-                            (findCompletedBefore(now - 30 days))
-                                    ↓
-                            For each completed trip:
-                                    ↓
-                            Trip Domain Service (delete)
-                                    ↓
-                            Trip Repository (soft delete / hard delete)
-                                    ↓
-                            Trip Event Publisher (trip-deleted)
-                                    ↓
-                            Cache Manager (invalidar cache)
+Usuario → API Gateway (POST /trips)
+    ↓
+Lambda Authorizer (valida JWT)
+    ↓
+Trip CRUD Function (Lambda)
+    ↓
+Aurora Serverless (INSERT en trips table)
+    ↓ (Transaction committed)
+Trip CRUD Function → Event Publisher Function
+    ↓
+EventBridge (trip-created event)
+    ↓
+ElastiCache (invalidate cache de usuario)
+    ↓
+CloudWatch (log + metric TripCreated)
+    ↓
+Return 201 Created + trip object
 ```
 
-### 5. Actualizar Estado de Viaje (IN_PROGRESS → COMPLETED)
+**Latencia típica:** 150-300ms
+- API Gateway: 20ms
+- Lambda cold start: 100ms (warm: 10ms)
+- Aurora query: 20-50ms
+- EventBridge async: No suma a latencia
+- Cache invalidation: Async
+
+### 2. Agrupación Automática de Reserva
 
 ```
-Scheduler (diario) → Trip Lifecycle Service
-                            ↓
-                    Trip Repository (findAll con endDate < now)
-                            ↓
-                    For each trip:
-                        Trip Entity (transición de estado)
-                            ↓
-                        PLANNED → IN_PROGRESS (si startDate <= now <= endDate)
-                        IN_PROGRESS → COMPLETED (si endDate < now)
-                            ↓
-                        Trip Repository (update)
-                            ↓
-                        Trip Event Publisher (trip-updated)
+Booking Service → EventBridge (booking-created event)
+    ↓
+EventBridge Rule (filter: type=booking-created)
+    ↓
+Booking Event Handler (Lambda)
+    ↓
+Paso 1: Query a Booking Service (obtener detalles)
+    ↓ (HTTP call)
+Booking Service retorna booking con fecha, destino
+    ↓
+Paso 2: Invoke Grouping Function (Lambda) con booking data
+    ↓
+Grouping Function:
+    ├─ Query Aurora: SELECT trips WHERE userId=X AND dates overlap
+    ├─ Algoritmo ML scoring (Python scikit-learn)
+    ├─ Calcular score de similitud por trip candidato
+    └─ Decidir:
+        ├─ Score > 0.7? → Agregar a trip existente (UPDATE trip_items)
+        └─ Score < 0.7? → Crear nuevo trip (INSERT trip + trip_item)
+    ↓
+Event Publisher → EventBridge (trip-item-added o trip-created)
+    ↓
+ElastiCache (invalidate cache)
 ```
+
+**Por qué 3GB RAM para Grouping Function:**
+- Algoritmo ML carga dataset de trips del usuario en memoria
+- scikit-learn requiere RAM para matrices de features
+- Para usuario con 100 trips = ~500MB de datos en memoria
+- 3GB permite procesar usuarios power (200+ trips)
+
+### 3. Consultar Viajes Próximos (Optimizado con Cache)
+
+```
+Usuario → API Gateway (GET /trips/upcoming)
+    ↓
+Trip Query Function (Lambda)
+    ↓
+ElastiCache Redis (GET trip:{userId}:upcoming)
+    ↓
+¿Cache HIT?
+    ├─ Sí → Return desde cache (latencia total: 50ms)
+    └─ No:
+        ↓
+        Aurora Serverless:
+        SELECT t.*, array_agg(ti.*) as items
+        FROM trips t
+        LEFT JOIN trip_items ti ON t.id = ti.trip_id
+        WHERE t.user_id = $1
+          AND t.end_date >= NOW()
+          AND t.status != 'COMPLETED'
+        GROUP BY t.id
+        ORDER BY t.start_date ASC
+        LIMIT 20
+        ↓ (50-100ms)
+        For each trip:
+            Query Booking Service para detalles de reservas
+            (Parallel HTTP calls con Promise.all)
+        ↓
+        Combinar trips + booking details
+        ↓
+        ElastiCache (SET con TTL 15 min)
+        ↓
+        Return (latencia total: 300-500ms)
+```
+
+**Cache Hit Ratio esperado:** 70-80% (usuarios consultan frecuentemente)
+
+### 4. Actualizar Viaje
+
+```
+Usuario → API Gateway (PUT /trips/{id})
+    ↓
+Trip CRUD Function (Lambda)
+    ↓
+Aurora Serverless (UPDATE trips WHERE id = $1)
+    ↓
+Event Publisher → EventBridge (trip-updated event)
+    ↓
+ElastiCache (invalidate cache del usuario)
+    ↓
+Return 200 OK + trip actualizado
+```
+
+---
+
+## 💰 Análisis de Costos
+
+### Costo Mensual Estimado (10,000 usuarios activos)
+
+| Servicio | Uso | Costo Mensual |
+|----------|-----|---------------|
+| **Lambda - Trip CRUD** | 300,000 invocations × 200ms × 512MB | ~$8 |
+| **Lambda - Trip Query** | 500,000 invocations × 100ms × 256MB | ~$6 |
+| **Lambda - Grouping** | 50,000 invocations × 2s × 3GB | ~$35 |
+| **Lambda - Event Handler** | 100,000 invocations × 500ms × 1GB | ~$10 |
+| **Aurora Serverless v2** | Promedio 2 ACUs × 730 hrs | ~$130 |
+| **ElastiCache Redis** | 2 nodes × cache.t4g.small × 730 hrs | ~$50 |
+| **API Gateway** | 800,000 requests | ~$2.80 |
+| **EventBridge** | 150,000 custom events | ~$1.50 |
+| **CloudWatch Logs** | 30 GB ingested | ~$15 |
+| **X-Ray** | 800,000 traces × 10% sampling | ~$4 |
+| **Total** | | **~$262/mes** |
+
+**Comparación con ECS Fargate 24/7:**
+- ECS Fargate (1 vCPU, 2GB): ~$730/mes × 2 tasks = $1,460/mes
+- **Ahorro con Serverless: 82%** 💰
+
+**¿Por qué es más barato?**
+- Lambda solo paga cuando ejecuta (no 24/7)
+- Aurora Serverless escala a 0.5 ACUs en horas valle
+- Cache reduce queries a base de datos
+
+---
+
+## 📊 Atributos de Calidad con AWS
+
+### Escalabilidad
+
+| Aspecto | Solución AWS | Capacidad |
+|---------|--------------|-----------|
+| **API Throughput** | Lambda concurrent: 1000 (default)<br/>API Gateway: 10,000 req/s | Soporta picos de tráfico masivos |
+| **Database** | Aurora Serverless: Auto-scale a 8 ACUs<br/>Read replicas: Hasta 15 | Escala con carga |
+| **Cache** | ElastiCache: Cluster mode con sharding | Millones de keys |
+
+### Disponibilidad
+
+| Aspecto | Solución AWS | SLA |
+|---------|--------------|-----|
+| **Lambda** | Multi-AZ automático | 99.95% |
+| **Aurora** | Multi-AZ deployment | 99.99% |
+| **ElastiCache** | Multi-AZ con failover | 99.99% |
+| **EventBridge** | Regional service Multi-AZ | 99.99% |
+
+### Performance
+
+| Aspecto | Solución AWS | Latencia |
+|---------|--------------|----------|
+| **API Response** | Lambda + Cache | 50ms (cache hit)<br/>300ms (cache miss) |
+| **Database Query** | Aurora + Provisioned IOPS | 20-50ms |
+| **Cache Read** | ElastiCache Redis | <1ms |
+| **Event Delivery** | EventBridge | <1s async |
+
+### Costo-Eficiencia
+
+| Aspecto | Solución | Ahorro |
+|---------|----------|--------|
+| **Lambda vs EC2** | Pago por invocación vs 24/7 | 70-80% |
+| **Aurora Serverless vs RDS** | Auto-scaling + pause | 50-60% |
+| **Cache layer** | ElastiCache reduce DB queries | 40% en Aurora costs |
+
+---
+
+## 🎯 Decisiones Arquitectónicas Clave
+
+### ✅ Aurora Serverless v2 vs RDS vs DynamoDB
+
+| Criterio | Aurora Serverless v2 ✅ | RDS Standard | DynamoDB |
+|----------|------------------------|--------------|----------|
+| **Auto-scaling** | ✅ 0.5-8 ACUs | ❌ Tamaño fijo | ✅ On-demand |
+| **Queries complejas (JOINs)** | ✅ SQL completo | ✅ SQL completo | ❌ Limitado |
+| **Transacciones ACID** | ✅ Nativo | ✅ Nativo | ⚠️ Limitadas |
+| **Costo en baja carga** | ✅ Pause automático | ❌ 24/7 | ✅ Pay per request |
+| **Latencia** | ⚠️ 20-50ms | ⚠️ 20-50ms | ✅ Single-digit ms |
+| **Familiaridad** | ✅ PostgreSQL | ✅ PostgreSQL | ❌ NoSQL learning curve |
+
+**Decisión:** Aurora Serverless v2 por balance costo-funcionalidad
+
+### ✅ Lambda 3GB RAM para Grouping vs ECS
+
+| Aspecto | Lambda 3GB ✅ | ECS Fargate |
+|---------|--------------|-------------|
+| **Costo por ejecución** | $0.0007 por invocación | $0.04 por minuto |
+| **Escalado** | Instant (0 a 1000) | 30-60 segundos |
+| **Cold start** | 500ms con provisioned | N/A |
+| **Duración max** | 15 minutos | Sin límite |
+| **Memoria max** | 10GB | 30GB |
+
+**¿Por qué Lambda gana?**
+- Agrupación toma <2 minutos (bien dentro de 15 min limit)
+- 3GB RAM suficiente para dataset de usuario
+- Invocaciones esporádicas (no necesita ECS 24/7)
+- 95% más barato que ECS para este caso
+
+### ✅ EventBridge como Event Bus
+
+**EventBridge elegido porque:**
+- ✅ **Event routing** con reglas (filter por tipo de evento)
+- ✅ **Schema registry** para validación
+- ✅ **Archive** de eventos (replay capability)
+- ✅ **Múltiples destinos** desde 1 evento (fan-out)
+- ✅ **Desacoplamiento** completo entre servicios
+
+---
+
+## 📈 Métricas Custom CloudWatch
+
+```python
+# Lambda Trip CRUD Function
+import boto3
+cloudwatch = boto3.client('cloudwatch')
+
+# Al crear trip
+cloudwatch.put_metric_data(
+    Namespace='TripManagementService',
+    MetricData=[
+        {
+            'MetricName': 'TripCreated',
+            'Dimensions': [
+                {'Name': 'CreationType', 'Value': 'Manual'}
+            ],
+            'Value': 1,
+            'Unit': 'Count'
+        }
+    ]
+)
+
+# Al agrupar booking
+cloudwatch.put_metric_data(
+    Namespace='TripManagementService',
+    MetricData=[
+        {
+            'MetricName': 'BookingGroupingScore',
+            'Dimensions': [
+                {'Name': 'Result', 'Value': 'Matched'}
+            ],
+            'Value': score,
+            'Unit': 'None',
+            'StorageResolution': 60  # High-resolution metric
+        }
+    ]
+)
+```
+
+### Alarmas CloudWatch
+
+| Alarma | Condición | Acción |
+|--------|-----------|--------|
+| **Lambda Errors > 5%** | ErrorRate > 5% por 5 min | SNS → PagerDuty |
+| **Grouping Score Avg < 0.5** | AvgScore < 0.5 por 1 hora | SNS → Slack (review algoritmo) |
+| **Aurora ACUs Max** | ACUs = 8 por 30 min | SNS → Escalar max ACUs |
+| **ElastiCache Hit Rate < 60%** | CacheHitRate < 60% por 15 min | SNS → Review TTL |
+| **API Latency p99 > 1s** | P99Latency > 1000ms por 10 min | SNS → On-call |
 
 ---
 
 ## 🎯 Algoritmo de Agrupación Automática
 
-El **Booking Grouping Service** usa un algoritmo multi-criterio para decidir a qué viaje pertenece una reserva:
+El **Booking Grouping Function** usa un algoritmo multi-criterio para decidir a qué viaje pertenece una reserva:
 
-### Paso 1: Búsqueda por Coincidencia Exacta de Fechas
+### Algoritmo de Scoring
+
+```python
+def calculate_trip_match_score(booking, trip):
+    """
+    Calcula score de 0.0 a 1.0 para determinar si booking pertenece a trip
+    """
+    score = 0.0
+
+    # 1. Coincidencia de fechas (peso: 0.5)
+    if is_date_in_range(booking.date, trip.start_date, trip.end_date):
+        score += 0.5
+    else:
+        # Proximidad temporal (peso: 0.3)
+        days_gap = abs(days_between(booking.date, trip.start_date))
+        if days_gap <= 3:
+            score += 0.3 * (1 - days_gap / 3.0)
+
+    # 2. Coincidencia de destino (peso: 0.3)
+    if booking.destination == trip.destination:
+        score += 0.3
+
+    # 3. Metadata adicional (peso: 0.2)
+    if booking.trip_hint and booking.trip_hint == trip.name:
+        score += 0.2
+
+    return score
+
+# Decisión de agrupación
+if max_score > 0.7:
+    # Alta confianza: agregar a trip existente
+    add_booking_to_trip(booking, best_match_trip)
+else:
+    # Baja confianza: crear nuevo trip automático
+    create_new_trip_from_booking(booking)
 ```
-Si reserva.fecha está entre trip.startDate y trip.endDate:
-    → Agregar a ese viaje
-```
-
-### Paso 2: Búsqueda por Proximidad Temporal
-```
-Si reserva.fecha está dentro de ±3 días de algún trip:
-    → Calcular puntuación de proximidad
-    → Seleccionar viaje con mayor puntuación
-```
-
-### Paso 3: Búsqueda por Ubicación Geográfica
-```
-Si reserva.destination coincide con trip.destination:
-    → Incrementar puntuación
-```
-
-### Paso 4: Decisión Final
-```
-Si puntuación_máxima > umbral (ej: 0.7):
-    → Agregar reserva a ese viaje
-Sino:
-    → Crear nuevo viaje automáticamente
-```
-
-### Ejemplo de Scoring
-
-```java
-public double calculateTripMatchScore(Booking booking, Trip trip) {
-    double score = 0.0;
-
-    // Coincidencia de fechas (peso: 0.5)
-    if (isDateInRange(booking.getDate(), trip.getStartDate(), trip.getEndDate())) {
-        score += 0.5;
-    } else {
-        // Proximidad temporal (peso: 0.3)
-        int daysGap = Math.abs(daysBetween(booking.getDate(), trip.getStartDate()));
-        if (daysGap <= 3) {
-            score += 0.3 * (1 - daysGap / 3.0);
-        }
-    }
-
-    // Coincidencia de destino (peso: 0.3)
-    if (booking.getDestination().equals(trip.getDestination())) {
-        score += 0.3;
-    }
-
-    // Metadata adicional (peso: 0.2)
-    if (booking.getTripHint() != null && booking.getTripHint().equals(trip.getName())) {
-        score += 0.2;
-    }
-
-    return score;
-}
-```
-
----
-
-## 📊 Modelo de Datos (Trip Database)
-
-### Tabla: trips
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | UUID | PK |
-| user_id | UUID | FK a usuarios |
-| name | VARCHAR(200) | Nombre del viaje |
-| destination | VARCHAR(200) | Destino principal |
-| start_date | DATE | Fecha inicio |
-| end_date | DATE | Fecha fin |
-| status | VARCHAR(20) | PLANNED, IN_PROGRESS, COMPLETED |
-| created_at | TIMESTAMP | Timestamp creación |
-| updated_at | TIMESTAMP | Timestamp última actualización |
-| deleted_at | TIMESTAMP | Soft delete (NULL si activo) |
-
-### Tabla: trip_items
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | UUID | PK |
-| trip_id | UUID | FK a trips |
-| booking_id | UUID | FK a reservas (en Booking Service) |
-| booking_type | VARCHAR(20) | FLIGHT, HOTEL, CAR |
-| sequence | INTEGER | Orden en itinerario |
-| created_at | TIMESTAMP | Timestamp creación |
-
-### Índices
-
-```sql
-CREATE INDEX idx_trips_user_id ON trips(user_id);
-CREATE INDEX idx_trips_status ON trips(status);
-CREATE INDEX idx_trips_dates ON trips(start_date, end_date);
-CREATE INDEX idx_trip_items_trip_id ON trip_items(trip_id);
-CREATE INDEX idx_trip_items_booking_id ON trip_items(booking_id);
-```
-
----
-
-## 🎯 Patrones de Diseño Aplicados
-
-### 1. Domain-Driven Design (DDD)
-- **Aggregate Root:** Trip Entity
-- **Entities:** Trip, TripItem
-- **Domain Services:** TripDomainService, BookingGroupingService
-- **Repository Pattern:** TripRepository
-
-### 2. CQRS (Command Query Responsibility Segregation)
-- **Commands:** CreateTrip, UpdateTrip, DeleteTrip
-- **Queries:** GetTrip, GetUpcomingTrips (con cache optimizado)
-
-### 3. Event-Driven Architecture
-- **Domain Events:** trip-created, trip-updated, trip-deleted
-- **Event Sourcing parcial:** Registro de cambios en viajes
-
-### 4. Strategy Pattern
-- **Uso:** Algoritmo de agrupación (puede tener múltiples estrategias)
-- **Beneficio:** Permitir diferentes estrategias de agrupación según contexto
-
-### 5. Scheduler Pattern
-- **Uso:** Limpieza automática de viajes
-- **Tecnología:** Spring @Scheduled
-
-### 6. Cache-Aside Pattern
-- **Uso:** Cache de viajes consultados frecuentemente
-- **TTL:** 15 minutos
-
----
-
-## 📊 Atributos de Calidad
-
-### Usabilidad
-- **Agrupación automática** reduce fricción para el usuario
-- **Detección inteligente** de viajes relacionados
-- **Auto-creación** de viajes cuando no existe coincidencia
-
-### Performance
-- **Cache** de viajes reduce latencia
-- **Índices** optimizados para queries frecuentes
-- **Queries paginadas** para listas grandes
-
-### Mantenibilidad
-- **DDD** con bounded context claro
-- **Separación de capas** (API, Application, Domain, Repository)
-- **Algoritmo de agrupación** aislado en servicio específico
-
-### Escalabilidad
-- **Stateless service** permite escalado horizontal
-- **Event-driven** permite procesamiento asíncrono
-- **Cache distribuido** (Redis) compartido entre instancias
-
-### Confiabilidad
-- **Soft delete** permite recuperación de viajes eliminados accidentalmente
-- **Optimistic locking** previene conflictos de concurrencia
-- **Transacciones** garantizan consistencia
-
----
-
-## 🚀 Extensibilidad
-
-### Agregar Nuevo Criterio de Agrupación
-
-Modificar `BookingGroupingService.calculateTripMatchScore()`:
-
-```java
-// Nuevo criterio: coincidencia de número de confirmación
-if (booking.getConfirmationPrefix().equals(trip.getConfirmationPrefix())) {
-    score += 0.15;
-}
-```
-
-### Agregar Nuevo Estado de Viaje
-
-1. Actualizar enum `TripStatus`
-2. Actualizar `TripLifecycleService` con nueva transición
-3. Actualizar validaciones en `TripValidator`
-
----
-
-## ⚙️ Configuración
-
-```yaml
-# application.yml
-trip-management:
-  grouping:
-    enabled: true
-    proximity-days: 3
-    minimum-score-threshold: 0.7
-  cleanup:
-    enabled: true
-    retention-days: 30
-    schedule: "0 0 2 * * *"  # Diario a las 2 AM
-  cache:
-    ttl-minutes: 15
-    max-size: 10000
-```
-
----
-
-## 📈 Métricas y Monitoreo
-
-### Métricas Clave
-
-- Número de viajes creados manualmente vs auto-creados
-- Tasa de acierto de agrupación automática
-- Número de reservas huérfanas (sin viaje asignado)
-- Latencia de consultas de viajes
-- Cache hit ratio
-- Número de viajes eliminados por cleanup
-
-### Alertas
-
-- Tasa de auto-creación de viajes > 80% (indica mal algoritmo de agrupación)
-- Cache hit ratio < 50%
-- Latencia de queries > 500ms
-- Cleanup fallando por > 2 días consecutivos
 
 ---
 
